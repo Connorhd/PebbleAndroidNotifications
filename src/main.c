@@ -60,7 +60,7 @@ void update_layer_callback(Layer *me, GContext *ctx) {
 				message = "No notifications";
 				break;
 			case COMM_ERROR:
-				message = "Error communicating with Android";
+				message = "Error: Could not connect to Android";
 				break;
 			default:
 				message = "Error";
@@ -69,8 +69,8 @@ void update_layer_callback(Layer *me, GContext *ctx) {
 		graphics_text_draw(ctx,
 		     message,
 		     fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-		     GRect(5, 53, 144 - ACTION_BAR_WIDTH - 10, 60),
-		     GTextOverflowModeTrailingEllipsis,
+		     GRect(5, 53, 144 - ACTION_BAR_WIDTH - 10, 80),
+		     GTextOverflowModeWordWrap,
 		     GTextAlignmentCenter,
 		     NULL);
 		
