@@ -1,0 +1,26 @@
+{
+    "media": [
+        {
+            "defName": "IMAGE_ICON",
+            "type": "png",
+            "file": "images/icon.png"
+        },
+        {
+            "defName": "IMAGE_CROSS",
+            "type": "png",
+            "file": "images/cross.png"
+        },
+        {
+            "defName": "IMAGE_DOWN",
+            "type": "png",
+            "file": "images/down.png"
+        },
+        {
+            "defName": "IMAGE_UP",
+            "type": "png",
+            "file": "images/up.png"
+        }
+    ],
+    "friendlyVersion": "VERSION",
+    "versionDefName": "APP_RESOURCES"
+}
