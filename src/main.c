@@ -10,6 +10,21 @@ PBL_APP_INFO(MY_UUID,
              APP_INFO_STANDARD_APP);
 
 #define MAX_NOTIFICATIONS 25
+#define LOADING_NOTIFICATIONS -1
+#define NO_NOTIFICATIONS -2
+#define COMM_ERROR -3
+	
+#define MSG_ASK_FOR_DATA 0
+#define MSG_DISMISS_NOTIFICATION 1
+	
+#define MSG_NOTIFICATIONS_CHANGED 500
+#define MSG_NO_NOTIFICATIONS 700
+#define MSG_LOAD_NOTIFICATION_ID 300
+#define MSG_NOTIFICATION_ICON_1 0
+#define MSG_NOTIFICATION_ICON_2 1
+#define MSG_NOTIFICATION_ICON_3 2
+#define MSG_NOTIFICATION_TITLE 200
+#define MSG_NOTIFICATION_DETAILS 100
 
 Window window;
 Layer layer;
@@ -28,14 +43,31 @@ typedef struct Notification {
 Notification notifications[MAX_NOTIFICATIONS];
 
 int8_t loadingNotification = 0;
-int8_t atNotification = -1;
+int8_t atNotification = LOADING_NOTIFICATIONS;
+
+// Drawing display
 
 void update_layer_callback(Layer *me, GContext *ctx) {
 	graphics_context_set_text_color(ctx, GColorBlack);
 	
 	if (atNotification < 0) {
+		char * message;
+		switch (atNotification) {
+			case LOADING_NOTIFICATIONS:
+				message = "Loading...";
+				break;
+			case NO_NOTIFICATIONS:
+				message = "No notifications";
+				break;
+			case COMM_ERROR:
+				message = "Error communicating with Android";
+				break;
+			default:
+				message = "Error";
+				break;
+		}
 		graphics_text_draw(ctx,
-		     atNotification == -2 ? "No notifications" : "Loading...",
+		     message,
 		     fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
 		     GRect(5, 53, 144 - ACTION_BAR_WIDTH - 10, 60),
 		     GTextOverflowModeTrailingEllipsis,
@@ -73,7 +105,7 @@ void update_layer_callback(Layer *me, GContext *ctx) {
 		if (atNotification == 0) {
 			action_bar_layer_clear_icon(&action_bar, BUTTON_ID_UP);
 		} else {
-				action_bar_layer_set_icon(&action_bar, BUTTON_ID_UP, &button_up.bmp);
+			action_bar_layer_set_icon(&action_bar, BUTTON_ID_UP, &button_up.bmp);
 		}
 		action_bar_layer_set_icon(&action_bar, BUTTON_ID_SELECT, &button_cross.bmp);
 		if (atNotification == loadingNotification) {
@@ -84,44 +116,111 @@ void update_layer_callback(Layer *me, GContext *ctx) {
 	}
 }
 
+// Button presses
 
-void my_next_click_handler(ClickRecognizerRef recognizer, Window *window) {
-	if (atNotification > -1 && atNotification < loadingNotification) {
-		atNotification++;
-		layer_mark_dirty(&layer);
-	}
-}
-void my_previous_click_handler(ClickRecognizerRef recognizer, Window *window) {
+void up_click_handler(ClickRecognizerRef recognizer, Window *window) {
 	if (atNotification > 0) {
 		atNotification--;
 		layer_mark_dirty(&layer);
 	}
 }
-void my_select_click_handler(ClickRecognizerRef recognizer, Window *window) {
+void select_click_handler(ClickRecognizerRef recognizer, Window *window) {
 	if (atNotification > -1) {
 		DictionaryIterator *dict;
 		if (app_message_out_get(&dict) == APP_MSG_OK) {
-			dict_write_int8(dict, 1, (int8_t)atNotification);
+			dict_write_int8(dict, MSG_DISMISS_NOTIFICATION, (int8_t)atNotification);
 			app_message_out_send();
 			app_message_out_release();
 		}
 	}
 }
-
-void click_config_provider(ClickConfig **config, void *context) {
-	config[BUTTON_ID_DOWN]->click.handler = (ClickHandler) my_next_click_handler;
-	config[BUTTON_ID_UP]->click.handler = (ClickHandler) my_previous_click_handler;
-	config[BUTTON_ID_SELECT]->click.handler = (ClickHandler) my_select_click_handler;
+void down_click_handler(ClickRecognizerRef recognizer, Window *window) {
+	if (atNotification > -1 && atNotification < loadingNotification) {
+		atNotification++;
+		layer_mark_dirty(&layer);
+	}
 }
+void click_config_provider(ClickConfig **config, void *context) {
+	config[BUTTON_ID_UP]->click.handler = (ClickHandler) up_click_handler;
+	config[BUTTON_ID_SELECT]->click.handler = (ClickHandler) select_click_handler;
+	config[BUTTON_ID_DOWN]->click.handler = (ClickHandler) down_click_handler;
+}
+
+// Communication with phone
 
 void ask_for_data() {
 	DictionaryIterator *dict;
 	if (app_message_out_get(&dict) == APP_MSG_OK) {
-		dict_write_uint8(dict, 0, 1);
+		dict_write_uint8(dict, MSG_ASK_FOR_DATA, 1);
 		app_message_out_send();
 		app_message_out_release();
 	}
 }
+void my_out_sent_handler(DictionaryIterator *sent, void *context) {
+	// All good, no need to do anything
+}
+void my_out_fail_handler(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+	atNotification = COMM_ERROR;
+	layer_mark_dirty(&layer);
+}
+void my_in_rcv_handler(DictionaryIterator *received, void *context) {
+	Tuple* cmd_tuple = dict_find(received, MSG_NOTIFICATIONS_CHANGED);
+	if (cmd_tuple != NULL) {
+		ask_for_data();
+	}
+	
+	cmd_tuple = dict_find(received, MSG_NO_NOTIFICATIONS);
+	if (cmd_tuple != NULL) {
+		atNotification = NO_NOTIFICATIONS;
+	}
+	
+	cmd_tuple = dict_find(received, MSG_LOAD_NOTIFICATION_ID);
+	if (cmd_tuple != NULL) {
+		loadingNotification = cmd_tuple->value->int8;
+		if (loadingNotification == 0) {
+			atNotification = 0;
+			vibes_short_pulse();
+		}
+	}
+	
+	cmd_tuple = dict_find(received, MSG_NOTIFICATION_ICON_1);
+	if (cmd_tuple != NULL) {
+		for (int i = 0; i < 116; i++) {
+			notifications[loadingNotification].icon[i + (i / 6) * 2] = cmd_tuple->value->data[i];
+		}
+	}
+
+	cmd_tuple = dict_find(received, MSG_NOTIFICATION_ICON_2);	
+	if (cmd_tuple != NULL) {
+		for (int i = 116; i < 116*2; i++) {
+			notifications[loadingNotification].icon[i + (i / 6) * 2] = cmd_tuple->value->data[i-116];
+		}
+	}
+	
+	cmd_tuple = dict_find(received, MSG_NOTIFICATION_ICON_3);
+	if (cmd_tuple != NULL) {
+		for (int i = 116*2; i < 116*2+56; i++) {
+			notifications[loadingNotification].icon[i + (i / 6) * 2] = cmd_tuple->value->data[i-116*2];
+		}
+	}	
+		
+	cmd_tuple = dict_find(received, MSG_NOTIFICATION_TITLE);
+	if (cmd_tuple != NULL) {
+		strcpy(&notifications[loadingNotification].title[0], cmd_tuple->value->cstring);
+	}
+
+	cmd_tuple = dict_find(received, MSG_NOTIFICATION_DETAILS);
+	if (cmd_tuple != NULL) {
+		strcpy(&notifications[loadingNotification].details[0], cmd_tuple->value->cstring);
+	}
+	
+  	layer_mark_dirty(&layer);
+}
+void my_in_drp_handler(void *context, AppMessageResult reason) {
+	// Java will handle NACKs, not sure if anything useful can be done here
+}
+
+// App lifecycle
 
 void handle_init(AppContextRef ctx) {
 	// Load resources
@@ -135,98 +234,25 @@ void handle_init(AppContextRef ctx) {
 	window_set_fullscreen(&window, true);
 	window_stack_push(&window, true /* Animated */);
 	
-	// Setup the layer that will display the text
+	// Setup the layer that will display the notifications
 	layer_init(&layer, (GRect){ .origin = GPointZero, .size = window.layer.frame.size });
 	layer.update_proc = update_layer_callback;
 	layer_add_child(&window.layer, &layer);
 	
+	// Setup action bar
 	action_bar_layer_init(&action_bar);
-	// Associate the action bar with the window:
 	action_bar_layer_add_to_window(&action_bar, &window);
-	// Set the click config provider:
 	action_bar_layer_set_click_config_provider(&action_bar, click_config_provider);
 
-	// Draw layer
+	// Trigger a layer update
 	layer_mark_dirty(&layer);
 	
 	ask_for_data();
 }
-
 void handle_deinit(AppContextRef ctx) {
   	bmp_deinit_container(&button_up);
 	bmp_deinit_container(&button_down);
 	bmp_deinit_container(&button_cross);
-}
-
-void my_out_sent_handler(DictionaryIterator *sent, void *context) {
-
-}
-void my_out_fail_handler(DictionaryIterator *failed, AppMessageResult reason, void *context) {
-
-}
-void my_in_rcv_handler(DictionaryIterator *received, void *context) {
-	Tuple* cmd_tuple = dict_find(received, 500);
-	
-	if (cmd_tuple != NULL) {
-		ask_for_data();
-	}
-	
-	cmd_tuple = dict_find(received, 700);
-	
-	if (cmd_tuple != NULL) {
-		atNotification = -2;
-	}
-	
-	cmd_tuple = dict_find(received, 300);
-	
-	if (cmd_tuple != NULL) {
-		loadingNotification = cmd_tuple->value->int8;
-		if (loadingNotification == 0) {
-			atNotification = 0;
-			vibes_short_pulse();
-		}
-	}
-	
-	cmd_tuple = dict_find(received, 0);
-	
-	if (cmd_tuple != NULL) {
-		for (int i = 0; i < 116; i++) {
-			notifications[loadingNotification].icon[i + (i / 6) * 2] = cmd_tuple->value->data[i];
-		}
-	}
-
-	cmd_tuple = dict_find(received, 1);
-	
-	if (cmd_tuple != NULL) {
-		for (int i = 116; i < 116*2; i++) {
-			notifications[loadingNotification].icon[i + (i / 6) * 2] = cmd_tuple->value->data[i-116];
-		}
-	}
-	
-	cmd_tuple = dict_find(received, 2);
-	
-	if (cmd_tuple != NULL) {
-		for (int i = 116*2; i < 116*2+56; i++) {
-			notifications[loadingNotification].icon[i + (i / 6) * 2] = cmd_tuple->value->data[i-116*2];
-		}
-	}
-	
-		
-	cmd_tuple = dict_find(received, 200);
-	
-	if (cmd_tuple != NULL) {
-		strcpy(&notifications[loadingNotification].title[0], cmd_tuple->value->cstring);
-	}	
-	cmd_tuple = dict_find(received, 100);
-	
-	if (cmd_tuple != NULL) {
-		strcpy(&notifications[loadingNotification].details[0], cmd_tuple->value->cstring);
-	}
-	
-  	layer_mark_dirty(&layer);
-}
-void my_in_drp_handler(void *context, AppMessageResult reason) {
-
 }
 
 void pbl_main(void *params) {
