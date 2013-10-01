@@ -100,7 +100,7 @@ public class NotificationService extends NotificationListenerService {
 							// Can't send that many notifications
 							return;
 						}
-						if (sbn.isOngoing() || sbn.getNotification().priority < Notification.PRIORITY_DEFAULT) {
+						if (sbn.isOngoing() || sbn.getNotification().priority < Notification.PRIORITY_DEFAULT || sbn.getNotification().icon == 0) {
 							// Ignore some notification types
 							continue;
 						}
@@ -171,64 +171,66 @@ public class NotificationService extends NotificationListenerService {
 						} catch (NameNotFoundException e) {
 						}
 						if (res != null) {
-							Bitmap icon = BitmapFactory.decodeResource(res, iconId);
-							icon = Bitmap.createScaledBitmap(icon, 48, 48, false);
-	
-							byte[] bitmap = new byte[116];
-	
-							int atByte = 0;
-							int atKey = 0;
-							StringBuilder bin = new StringBuilder();
-	
-							boolean grayscale = true;
-							for (int y = 0; y < 48; y++) {
-								for (int x = 0; x < 48; x++) {
-									int c = icon.getPixel(x, y);
-									if ((c & 0x000000FF) != (c >> 8 & 0x000000FF) || (c >> 8 & 0x000000FF) != (c >> 16 & 0x000000FF)) {
-										grayscale = false;
+							try {
+								Bitmap icon = BitmapFactory.decodeResource(res, iconId);
+								icon = Bitmap.createScaledBitmap(icon, 48, 48, false);
+		
+								byte[] bitmap = new byte[116];
+		
+								int atByte = 0;
+								int atKey = 0;
+								StringBuilder bin = new StringBuilder();
+		
+								boolean grayscale = true;
+								for (int y = 0; y < 48; y++) {
+									for (int x = 0; x < 48; x++) {
+										int c = icon.getPixel(x, y);
+										if ((c & 0x000000FF) != (c >> 8 & 0x000000FF) || (c >> 8 & 0x000000FF) != (c >> 16 & 0x000000FF)) {
+											grayscale = false;
+										}
 									}
 								}
-							}
-	
-							for (int y = 0; y < 48; y++) {
-								for (int x = 0; x < 48; x++) {
-									int c = icon.getPixel(x, y);
-									int averageColor = ((c & 0x000000FF) + (c >> 8 & 0x000000FF) + (c >> 16 & 0x000000FF)) / 3;
-									int opacity = ((c >> 24) & 0x000000FF);
-	
-									// Less than 50% opacity or (if a colour icon)
-									// very light colours are "white"
-									if (opacity < 127 || (!grayscale && averageColor > 225)) {
-										bin.append("0");
-									} else {
-										bin.append("1");
+		
+								for (int y = 0; y < 48; y++) {
+									for (int x = 0; x < 48; x++) {
+										int c = icon.getPixel(x, y);
+										int averageColor = ((c & 0x000000FF) + (c >> 8 & 0x000000FF) + (c >> 16 & 0x000000FF)) / 3;
+										int opacity = ((c >> 24) & 0x000000FF);
+		
+										// Less than 50% opacity or (if a colour icon)
+										// very light colours are "white"
+										if (opacity < 127 || (!grayscale && averageColor > 225)) {
+											bin.append("0");
+										} else {
+											bin.append("1");
+										}
+										if (bin.length() == 8) {
+											bin.reverse();
+											bitmap[atByte++] = (byte) Integer.parseInt(bin.toString(), 2);
+											bin = new StringBuilder();
+										}
+										if (atByte == 116) {
+											dict = new PebbleDictionary();
+											dict.addBytes(atKey++, bitmap);
+											outgoing.add(dict);
+											atByte = 0;
+											bitmap = new byte[116];
+										}
 									}
-									if (bin.length() == 8) {
-										bin.reverse();
-										bitmap[atByte++] = (byte) Integer.parseInt(bin.toString(), 2);
-										bin = new StringBuilder();
-									}
-									if (atByte == 116) {
-										dict = new PebbleDictionary();
-										dict.addBytes(atKey++, bitmap);
-										outgoing.add(dict);
-										atByte = 0;
-										bitmap = new byte[116];
-									}
+		
 								}
-	
+								dict = new PebbleDictionary();
+								dict.addBytes(atKey, bitmap);
+								outgoing.add(dict);
+							} catch (Exception e) {
+								
 							}
-							dict = new PebbleDictionary();
-							dict.addBytes(atKey, bitmap);
-							outgoing.add(dict);
 						}
 					}
 					
 					if (notifId == 0) {
-						// Tell the watch no notifications
-						PebbleDictionary dict = new PebbleDictionary();
-						dict.addInt8(700, (byte) 1);
-						outgoing.add(dict);
+						// No notifications - Close application on watch
+						PebbleKit.closeAppOnPebble(getApplicationContext(), appUUID);
 					}
 					flushOutgoing();
 				} else if (data.contains(1)) {
@@ -257,7 +259,7 @@ public class NotificationService extends NotificationListenerService {
 
 	@Override
 	public void onNotificationPosted(StatusBarNotification sbn) {
-		if (!sbn.isOngoing() && sbn.getNotification().priority >= Notification.PRIORITY_DEFAULT) {
+		if (!sbn.isOngoing() && sbn.getNotification().priority >= Notification.PRIORITY_DEFAULT && sbn.getNotification().icon != 0) {
 			// Start if not running
 			PebbleKit.startAppOnPebble(getApplicationContext(), appUUID);
 
